@@ -28,6 +28,8 @@ jobs:
             ~/.cargo/git
             contracts/target
           key: escrow-1128-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock') }}
+      - name: Format new module
+        run: rustfmt --edition 2021 src/test_creation_escrow.rs
       - name: Check contract
         continue-on-error: true
         run: set -o pipefail; cargo check --locked 2>&1 | tee check.log
@@ -45,6 +47,12 @@ jobs:
       - name: WASM build
         continue-on-error: true
         run: set -o pipefail; cargo build --locked --target wasm32-unknown-unknown --release 2>&1 | tee wasm.log
+      - name: Verify real test outcomes
+        if: always()
+        run: |
+          grep -q "test result: ok" escrow.log
+          grep -q "test result: ok" full.log
+          ! grep -q "test result: FAILED" full.log
       - name: Format new test module for review
         if: always()
         run: rustfmt --edition 2021 src/test_creation_escrow.rs

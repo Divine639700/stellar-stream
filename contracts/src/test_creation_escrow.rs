@@ -7,6 +7,14 @@ use soroban_sdk::{
     token, IntoVal,
 };
 
+fn committed_events(env: &Env) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+    // SDK 21 Events::all includes events from failed invocations. The snapshot
+    // retains failed_call, which distinguishes diagnostics from committed events.
+    env.to_snapshot().events.0.into_iter()
+        .filter(|event| !event.failed_call && event.event.type_ == soroban_sdk::xdr::ContractEventType::Contract)
+        .map(|event| event.event).collect()
+}
+
 fn authorize_creation(env: &Env, contract: &Address, token: &Address, sender: &Address,
     recipient: &Address, amount: i128) {
     env.mock_auths(&[MockAuth {
@@ -106,6 +114,11 @@ fn creation_escrow_boundaries_require_sender_and_pay_recipient_exactly() {
         assert_eq!(claimed.claimed_amount, amount);
         assert_eq!(events[2].1,
             (symbol_short!("Stream"), symbol_short!("Completed")).into_val(&env));
+        let completed: StreamCompleted = events[2].2.into_val(&env);
+        assert_eq!(completed.stream_id, id);
+        assert_eq!(completed.actor, recipient);
+        assert_eq!(completed.timestamp, 1100);
+        assert_eq!(completed.total_amount, amount);
         assert_eq!(client.get_stream(&id).claimed_amount, amount);
         assert_eq!(token.balance(&sender), 0);
         assert_eq!(token.balance(&contract), 0);
@@ -117,6 +130,10 @@ fn creation_escrow_boundaries_require_sender_and_pay_recipient_exactly() {
 // and publishes a transfer event before rejecting. All effects must roll back.
 mod failing_token {
     use super::*;
+    #[soroban_sdk::contracterror]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+    #[repr(u32)]
+    pub enum TransferError { Rejected = 77 }
     #[contract]
     pub struct FailingToken;
     #[contractimpl]
@@ -140,7 +157,7 @@ mod failing_token {
             env.storage().persistent().set(&to, &credit);
             env.events().publish((symbol_short!("transfer"), from, to), amount);
             if env.storage().instance().get(&symbol_short!("reject")).unwrap_or(false) {
-                panic!("token rejected after debit");
+                soroban_sdk::panic_with_error!(&env, TransferError::Rejected);
             }
         }
     }
@@ -158,11 +175,15 @@ fn creation_escrow_transfer_failure_rolls_back_token_state_events_and_id() {
         let token = failing_token::FailingTokenClient::new(&env, &asset);
         token.seed(&sender, &amount);
         token.reject(&true);
-        let before = env.events().all();
+        let before = committed_events(&env);
         authorize_creation(&env, &contract, &asset, &sender, &recipient, amount);
-        assert!(client.try_create_stream(&sender, &recipient, &asset, &amount,
-            &100, &1100, &0, &None).is_err());
-        assert_eq!(env.events().all(), before);
+        assert_eq!(client.try_create_stream(&sender, &recipient, &asset, &amount,
+            &100, &1100, &0, &None), Err(Ok(soroban_sdk::Error::from_contract_error(77))));
+        assert_eq!(committed_events(&env), before);
+        // The failed diagnostic proves transfer ran past its writes/event;
+        // it must not be mistaken for a committed token transfer.
+        assert_eq!(env.to_snapshot().events.0.iter().filter(|event|
+            event.failed_call && event.event.type_ == soroban_sdk::xdr::ContractEventType::Contract).count(), 1);
         assert_eq!(client.get_next_stream_id(), 0);
         assert!(client.try_get_stream(&1).is_err());
         assert_eq!(token.balance(&sender), amount);
@@ -176,7 +197,7 @@ fn creation_escrow_transfer_failure_rolls_back_token_state_events_and_id() {
             &100, &1100, &0, &None), 1);
         let events = env.events().all();
         assert_eq!(events.iter().filter(|event| event.0 == contract).count(), 1);
-        assert_eq!(events.iter().filter(|event| event.0 == asset).count(), 1);
+        assert_eq!(committed_events(&env).len(), 2); // transfer + Created
         assert_eq!(token.balance(&sender), 0);
         assert_eq!(token.balance(&contract), amount);
         assert_eq!(client.get_stream(&1).total_amount, amount);

@@ -7884,6 +7884,8 @@ fn test_1138_transfer_failure_after_authorization_rolls_back() {
     // t=1_500: 499 is claimable and the recipient signs, but the transfer fails.
     f.set_time(1_500);
     assert_eq!(f.client.claimable(&f.stream_id, &1_500), 499);
+    let before = f.stream();
+    let events_before = f.contract_events();
     f.sign_claim(&f.recipient, 499);
     assert!(f
         .client
@@ -7892,6 +7894,10 @@ fn test_1138_transfer_failure_after_authorization_rolls_back() {
 
     // Rollback: stream state, balances and events are exactly as before.
     let stream = f.stream();
+    assert_eq!(stream, before);
+    assert_eq!(f.contract_events(), events_before);
+    assert_eq!(f.token.balance(&f.sender), 0);
+    assert_eq!(f.token.balance(&sink), 999);
     assert_eq!(stream.claimed_amount, 1);
     assert_eq!(stream.last_claim_time, 1_200);
     assert_eq!(f.token.balance(&f.recipient), 1);
@@ -8361,7 +8367,10 @@ fn test_1136_partial_claim_authority_is_checked_again_for_remainder() {
         if let Some(signer) = signer {
             f.sign_claim(signer, 499);
         }
-        assert!(f.client.try_claim(&f.stream_id, &f.recipient, &499).is_err());
+        assert!(f
+            .client
+            .try_claim(&f.stream_id, &f.recipient, &499)
+            .is_err());
         assert_eq!(f.stream(), before);
         assert_eq!(f.contract_events(), events_before);
         assert_eq!(f.token.balance(&f.recipient), 1);
@@ -8372,7 +8381,10 @@ fn test_1136_partial_claim_authority_is_checked_again_for_remainder() {
 
     // An authorization for one unit does not authorize a different amount.
     f.sign_claim(&f.recipient, 1);
-    assert!(f.client.try_claim(&f.stream_id, &f.recipient, &499).is_err());
+    assert!(f
+        .client
+        .try_claim(&f.stream_id, &f.recipient, &499)
+        .is_err());
     assert_eq!(f.stream(), before);
     assert_eq!(f.contract_events(), events_before);
     assert_eq!(f.token.balance(&f.recipient), 1);

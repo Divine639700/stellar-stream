@@ -1,0 +1,32 @@
+name: Issue 1136 validation
+on:
+  push:
+    branches: [validation/1136-auth-d51a]
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - name: Targeted authority and transfer rollback tests
+        working-directory: contracts
+        run: |
+          cargo +1.88.0 test --locked test_1136
+          cargo +1.88.0 test --locked test_1138
+      - name: Full contract tests
+        if: always()
+        working-directory: contracts
+        run: cargo +1.88.0 test --locked
+      - name: WASM build
+        if: always()
+        working-directory: contracts
+        run: cargo +1.88.0 build --locked --target wasm32-unknown-unknown --release
+      - name: Formatting
+        if: always()
+        working-directory: contracts
+        run: cargo +1.88.0 fmt --all -- --check

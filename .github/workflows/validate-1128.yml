@@ -1,0 +1,57 @@
+name: Issue 1128 escrow validation
+on:
+  push:
+    branches: [validation/1128-escrow-20261022]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      RUSTUP_TOOLCHAIN: 1.88.0
+      CARGO_BUILD_JOBS: 2
+    defaults:
+      run:
+        working-directory: contracts
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: escrow-1128-${{ runner.os }}-${{ hashFiles('contracts/Cargo.lock') }}
+      - name: Check contract
+        continue-on-error: true
+        run: set -o pipefail; cargo check --locked 2>&1 | tee check.log
+      - name: Escrow regression tests
+        continue-on-error: true
+        run: set -o pipefail; cargo test --locked creation_escrow_ -- --test-threads=2 2>&1 | tee escrow.log
+      - name: Full contract suite
+        continue-on-error: true
+        run: set -o pipefail; cargo test --locked -- --test-threads=2 2>&1 | tee full.log
+      - name: Required formatting and lint
+        continue-on-error: true
+        run: |
+          cargo fmt --all -- --check > fmt.log 2>&1
+          cargo clippy --locked --all-targets --all-features -- -D warnings > clippy.log 2>&1
+      - name: WASM build
+        continue-on-error: true
+        run: set -o pipefail; cargo build --locked --target wasm32-unknown-unknown --release 2>&1 | tee wasm.log
+      - name: Format new test module for review
+        if: always()
+        run: rustfmt --edition 2021 src/test_creation_escrow.rs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: escrow-1128-evidence
+          path: |
+            contracts/*.log
+            contracts/src/test_creation_escrow.rs

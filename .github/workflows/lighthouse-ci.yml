@@ -33,7 +33,7 @@ jobs:
         run: npm run build
 
       - name: Install serve and Lighthouse CI
-        run: npm install --no-save serve @lhci/cli@0.14.x
+        run: npm install --no-save --legacy-peer-deps serve @lhci/cli@0.14.x
 
       - name: Run Lighthouse CI
         run: |
